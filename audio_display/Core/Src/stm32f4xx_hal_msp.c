@@ -25,6 +25,8 @@
 /* USER CODE END Includes */
 extern DMA_HandleTypeDef hdma_spi2_rx;
 
+extern DMA_HandleTypeDef hdma_spi3_tx;
+
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
 
@@ -235,6 +237,25 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* hspi)
     GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+    /* SPI3 DMA Init */
+    /* SPI3_TX Init */
+    hdma_spi3_tx.Instance = DMA1_Stream5;
+    hdma_spi3_tx.Init.Channel = DMA_CHANNEL_0;
+    hdma_spi3_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_spi3_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_spi3_tx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_spi3_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_spi3_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_spi3_tx.Init.Mode = DMA_NORMAL;
+    hdma_spi3_tx.Init.Priority = DMA_PRIORITY_LOW;
+    hdma_spi3_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_spi3_tx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(hspi,hdmatx,hdma_spi3_tx);
+
     /* USER CODE BEGIN SPI3_MspInit 1 */
 
     /* USER CODE END SPI3_MspInit 1 */
@@ -268,6 +289,8 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef* hspi)
 
     HAL_GPIO_DeInit(GPIOB, GPIO_PIN_3|GPIO_PIN_5);
 
+    /* SPI3 DMA DeInit */
+    HAL_DMA_DeInit(hspi->hdmatx);
     /* USER CODE BEGIN SPI3_MspDeInit 1 */
 
     /* USER CODE END SPI3_MspDeInit 1 */

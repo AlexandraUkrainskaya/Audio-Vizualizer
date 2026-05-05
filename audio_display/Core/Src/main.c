@@ -1,4 +1,5 @@
 /* USER CODE BEGIN Header */
+//https://github.com/wjklimek1/ILI9341_DMA_library
 /**
   ******************************************************************************
   * @file           : main.c
@@ -18,8 +19,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "freeRTOS.h"
-#include "task.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -46,6 +46,7 @@ I2S_HandleTypeDef hi2s2;
 DMA_HandleTypeDef hdma_spi2_rx;
 
 SPI_HandleTypeDef hspi3;
+DMA_HandleTypeDef hdma_spi3_tx;
 
 UART_HandleTypeDef huart1;
 
@@ -81,18 +82,31 @@ TaskHandle_t xScreenTaskHandle = NULL;
 //a task to communicate with the phone via bluetooth
 TaskHandle_t xBTTaskHandle     = NULL;
 //a task to read sensor outputs
-TaskHandle_t xDataProcessingHandle  = NULL;
+TaskHandle_t xDataProcessHandle  = NULL;
 
 //SAMPLE BUFFER
 #define MIC_PDM_BUFFER_TOTAL 128
-uint16_t pdmBufferf[MIC_PDM_BUFFER_TOTAL];
+volatile uint16_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
 
 
 //INTERRUPT HANDLERS
 
 //I2S DMA interrupt
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s) {
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	vTaskNotifyGiveFromISR(xDataProcessHandle,
+						   &xHigherPriorityTaskWoken);
+	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
 
+//task functions
+void dataProcessTask(void * pvParameters ) {
+	while(1) {
+		//wait for the data
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		//process the data
+		printf("data received, the first value is \n");
+	}
 }
 
 /* USER CODE END 0 */
@@ -141,13 +155,6 @@ int main(void)
   //bluetooth task (xBTTaskHandle)
   //audio data processing task (xDataProcessingHandle)
 
-  //start the scheduler
-  vTaskStartScheduler();
-  /* USER CODE END 2 */
-
-  /* Init scheduler */
-  //osKernelInitialize();
-
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
@@ -166,7 +173,6 @@ int main(void)
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  //defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -174,11 +180,17 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
+  BaseType_t xReturned;
+  /* Create the task, storing the handle. */
+  xReturned = xTaskCreate(
+              dataProcessTask,       /* Function that implements the task. */
+              "data_proc",          /* Text name for the task. */
+              512,      /* Stack size in words, not bytes. */
+              ( void * ) NULL,    /* Parameter passed into the task. */
+              3,/* Priority at which the task is created. */
+              &xDataProcessHandle);      /* Used to pass out the created task's handle. */
+  vTaskStartScheduler();
   /* USER CODE END RTOS_EVENTS */
-
-  /* Start scheduler */
-  //osKernelStart();
-
   /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
@@ -355,6 +367,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Stream3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
 
 }
 
