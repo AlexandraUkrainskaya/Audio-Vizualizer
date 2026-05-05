@@ -119,7 +119,7 @@ void dataProcessTask(void * pvParameters ) {
 		//wait for the data
 		xTaskNotifyWait(0, 0xFFFFFFFF, &ulNotifiedValue, portMAX_DELAY);
 		//process the data
-		printf("data received, the first value is \n");
+		printf("data received, the address of the array is %d \n", ulNotifiedValue);
 	}
 }
 
