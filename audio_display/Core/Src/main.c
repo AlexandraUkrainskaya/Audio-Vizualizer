@@ -94,16 +94,30 @@ volatile uint16_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
 //I2S DMA interrupt
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s) {
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	vTaskNotifyGiveFromISR(xDataProcessHandle,
-						   &xHigherPriorityTaskWoken);
-	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	/* Cast pointer to uint32_t and send as notification value */
+	xTaskNotifyFromISR(xDataProcessHandle,
+	                   (uint32_t)&pdmBuffer[MIC_PDM_BUFFER_TOTAL/2],        /* first half pointer */
+	                   eSetValueWithOverwrite,
+	                   &xHigherPriorityTaskWoken);
+	    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+		/* Cast pointer to uint32_t and send as notification value */
+		xTaskNotifyFromISR(xDataProcessHandle,
+		                   (uint32_t)&pdmBuffer[0],        /* first half pointer */
+		                   eSetValueWithOverwrite,
+		                   &xHigherPriorityTaskWoken);
+		    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 //task functions
 void dataProcessTask(void * pvParameters ) {
+	uint32_t ulNotifiedValue;
 	while(1) {
 		//wait for the data
-		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		xTaskNotifyWait(0, 0xFFFFFFFF, &ulNotifiedValue, portMAX_DELAY);
 		//process the data
 		printf("data received, the first value is \n");
 	}
