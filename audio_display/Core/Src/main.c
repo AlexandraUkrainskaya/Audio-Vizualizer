@@ -159,15 +159,11 @@ int main(void)
   MX_SPI3_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  //initialize the screen
 
-  //start the first audio sampling transaction
-  HAL_I2S_Receive_DMA(&hi2s2, pdmBuffer, MIC_PDM_BUFFER_TOTAL);
+  /* USER CODE END 2 */
 
-  //create the tasks
-  //screen task (xScreenTaskHandle)
-  //bluetooth task (xBTTaskHandle)
-  //audio data processing task (xDataProcessingHandle)
+  /* Init scheduler */
+  osKernelInitialize();
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -187,6 +183,7 @@ int main(void)
 
   /* Create the thread(s) */
   /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -204,7 +201,19 @@ int main(void)
               3,/* Priority at which the task is created. */
               &xDataProcessHandle);      /* Used to pass out the created task's handle. */
   vTaskStartScheduler();
+  xReturned = xTaskCreate(
+                dataProcessTask,       /* Function that implements the task. */
+                "data_proc",          /* Text name for the task. */
+                512,      /* Stack size in words, not bytes. */
+                ( void * ) NULL,    /* Parameter passed into the task. */
+                3,/* Priority at which the task is created. */
+                &xDataProcessHandle);      /* Used to pass out the created task's handle. */
+    vTaskStartScheduler();
   /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
   /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
@@ -417,6 +426,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, LD4_Pin|LD3_Pin|LD5_Pin|LD6_Pin
                           |Audio_RST_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, Screen_CS_Pin|Screen_DC_Pin|Screen_RST_Pin|Screen_BL_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : CS_I2C_SPI_Pin */
   GPIO_InitStruct.Pin = CS_I2C_SPI_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -473,6 +485,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(OTG_FS_OverCurrent_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : Screen_CS_Pin Screen_DC_Pin Screen_RST_Pin Screen_BL_Pin */
+  GPIO_InitStruct.Pin = Screen_CS_Pin|Screen_DC_Pin|Screen_RST_Pin|Screen_BL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : MEMS_INT2_Pin */
   GPIO_InitStruct.Pin = MEMS_INT2_Pin;

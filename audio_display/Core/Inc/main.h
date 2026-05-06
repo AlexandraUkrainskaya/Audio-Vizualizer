@@ -99,6 +99,14 @@ void Error_Handler(void);
 #define Audio_RST_GPIO_Port GPIOD
 #define OTG_FS_OverCurrent_Pin GPIO_PIN_5
 #define OTG_FS_OverCurrent_GPIO_Port GPIOD
+#define Screen_CS_Pin GPIO_PIN_4
+#define Screen_CS_GPIO_Port GPIOB
+#define Screen_DC_Pin GPIO_PIN_6
+#define Screen_DC_GPIO_Port GPIOB
+#define Screen_RST_Pin GPIO_PIN_7
+#define Screen_RST_GPIO_Port GPIOB
+#define Screen_BL_Pin GPIO_PIN_8
+#define Screen_BL_GPIO_Port GPIOB
 #define MEMS_INT2_Pin GPIO_PIN_1
 #define MEMS_INT2_GPIO_Port GPIOE
 
