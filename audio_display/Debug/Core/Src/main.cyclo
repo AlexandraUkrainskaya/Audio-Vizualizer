@@ -1,7 +1,9 @@
-../Core/Src/main.c:80:6:HAL_I2S_RxCpltCallback	2
-../Core/Src/main.c:90:6:HAL_I2S_RxHalfCpltCallback	2
-../Core/Src/main.c:101:6:dataProcessTask	1
-../Core/Src/main.c:117:5:main	1
-../Core/Src/main.c:193:6:SystemClock_Config	3
-../Core/Src/main.c:246:6:HAL_TIM_PeriodElapsedCallback	2
-../Core/Src/main.c:264:6:Error_Handler	1
+../Core/Src/main.c:84:6:HAL_SPI_TxCpltCallback	2
+../Core/Src/main.c:91:6:HAL_I2S_RxCpltCallback	2
+../Core/Src/main.c:101:6:HAL_I2S_RxHalfCpltCallback	2
+../Core/Src/main.c:112:6:dataProcessTask	1
+../Core/Src/main.c:122:6:screenTask	1
+../Core/Src/main.c:138:5:main	1
+../Core/Src/main.c:223:6:SystemClock_Config	3
+../Core/Src/main.c:276:6:HAL_TIM_PeriodElapsedCallback	2
+../Core/Src/main.c:294:6:Error_Handler	1

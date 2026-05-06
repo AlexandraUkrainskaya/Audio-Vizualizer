@@ -75,12 +75,17 @@ TaskHandle_t xDataProcessHandle  = NULL;
 volatile uint16_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
 
 //current mode of display
-enum display_mode_enum {};
+enum display_mode_enum {FREQUENCY_BARS};
 
 
 //INTERRUPT HANDLERS
 
 //SPI DMA interrupt
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
+	if (hspi->Instance == ILI_SPI_HANDLE.Instance) {
+		ILI_DMA_Callback();
+	}
+}
 
 //I2S DMA interrupt
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s) {
@@ -160,8 +165,14 @@ int main(void)
   MX_SPI3_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  //turn on the screen
+  HAL_GPIO_WritePin(Screen_BL_GPIO_Port, Screen_BL_Pin, GPIO_PIN_SET);
+  //init screen
+  ILI_Init();
+  //fill it with the default color
+  ILI_DMA_Fill(WHITE);
   //first DMA transfer
-  HAL_I2S_Transmit_DMA(&hi2s, pdmBuffer, MIC_PDM_BUFFER_TOTAL);
+  HAL_I2S_Transmit_DMA(&hi2s2, pdmBuffer, MIC_PDM_BUFFER_TOTAL);
   //create tasks
   BaseType_t xReturned;
   /* Create the task, storing the handle. */
