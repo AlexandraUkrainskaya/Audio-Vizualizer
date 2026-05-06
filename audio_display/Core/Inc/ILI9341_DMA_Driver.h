@@ -1,381 +1,173 @@
+//
 //--------------------------------------------
 //	ILI9341 DMA Driver library for STM32 HAL
 //	https://github.com/yuujiin/STM32_ILI9341_DMA_Driver
 //--------------------------------------------
+//
+//
+//	MIT License
+//
+//	Copyright (c) 2020 yuujiin
+//	https://github.com/yuujiin
+//
+//	Based on library by Matej Artnak
+//	Copyright (c) 2017 Matej Artnak
+//	https://github.com/martnak/STM32-ILI9341
+//
+//	Permission is hereby granted, free of charge, to any person obtaining a copy
+//	of this software and associated documentation files (the "Software"), to deal
+//	in the Software without restriction, including without limitation the rights
+//	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//	copies of the Software, and to permit persons to whom the Software is
+//	furnished to do so, subject to the following conditions:
+//
+//	The above copyright notice and this permission notice shall be included in all
+//	copies or substantial portions of the Software.
+//
+//	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//	SOFTWARE.
+//
+//
+//-----------------------------------
+//	How to use this library
+//-----------------------------------
+//
+//	* Generate SPI peripheral and 3 GPIO outputs
+//		* STM32Cube code generation: separate .c/.h files for each peripheral
+//		* SPI peripheral: CPOL=LOW, CPHA=1EDGE, 8 bits, MSB first, Software NSS, up to 50 MHz
+//		* Tx DMA for SPI: Half Word (16 bits) data width
+//		* GPIO: CS, DC and RST outputs
+//		* GPIO_SPEED_FREQ_VERY_HIGH for CS and DC pins
+//		* GPIO initial values: RST=Low, CS=High - LCD is in reset state before ILI_Init()
+//	* Configure parameters in ILI9341_Driver.h:
+//		* Define your ILI_SPI_HANDLE
+//		* Define your CS, DC and RST outputs
+//		* Check if ILI_SCREEN_WIDTH and ILI_SCREEN_HEIGHT match your LCD size and orientation.
+//	* In your main program initialize LCD with ILI_Init() before use
+//
+//-----------------------------------
+//	Code example
+//-----------------------------------
+//
+//	/* Includes */
+//	#include "ILI9341_DMA_Driver.h"
+//	/* Global vars */
+//	volatile uint16_t display_buf[ILI_SCREEN_WIDTH*ILI_SCREEN_HEIGHT] __ALIGNED(32);	// aligned for DCache
+//	/* Interrupt callback */
+//	void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
+//		if (hspi->Instance == ILI_SPI_HANDLE.Instance) {
+//			ILI_DMA_Callback();
+//		}
+//	}
+//	/* Main program init section */
+//	ILI_Init();
+//	/* Splash screen */
+//	ILI_DMA_Fill(BLACK);
+//	while (ILI_DMA_Busy());
+//	/* Draw something */
+//	uint32_t i;
+//	for (i = 0; i < (ILI_SCREEN_WIDTH*ILI_SCREEN_HEIGHT); i++) {
+//	  if (i < ILI_SCREEN_HEIGHT/4*ILI_SCREEN_WIDTH) {
+//		  display_buf[i] = RED;
+//	  } else if (i < ILI_SCREEN_HEIGHT/2*ILI_SCREEN_WIDTH) {
+//		  display_buf[i] = GREEN;
+//	  } else if (i < ILI_SCREEN_HEIGHT/4*3*ILI_SCREEN_WIDTH) {
+//		  display_buf[i] = BLUE;
+//	  } else {
+//		  display_buf[i] = YELLOW;
+//	  }
+//	}
+//	/* Load frame buffer */
+//	ILI_DMA_Load((uint16_t *)display_buf);
+//
+//-----------------------------------
 
 
-/* Includes ------------------------------------------------------------------*/
-#include "ILI9341_DMA_Driver.h"
+#ifndef ILI9341_DMA_DRIVER_H
+#define ILI9341_DMA_DRIVER_H
 
-/* Local Variables ----------------------------------------------------------*/
-static uint16_t Block_Width  = ILI_SCREEN_WIDTH;
-static uint16_t Block_Height = ILI_SCREEN_HEIGHT;
-static volatile uint32_t  DMA_SizeRemaining = 0;
-static volatile uint16_t *DMA_BufRemaining;
-static volatile uint16_t  DMA_BufFill __ALIGNED(32)	= BLACK;	// Aligned for DCache
-static volatile uint8_t	  DMA_Busy = 0;
+#include "main.h"
+#include "spi.h"
 
-/* HARDWARE RESET */
-void ILI_Reset(void) {
-	HAL_GPIO_WritePin(ILI_RST_PORT, ILI_RST_PIN, GPIO_PIN_RESET);
-	HAL_Delay(200);
-	HAL_GPIO_WritePin(ILI_CS_PORT, ILI_CS_PIN, GPIO_PIN_SET);
-	HAL_Delay(200);
-	HAL_GPIO_WritePin(ILI_RST_PORT, ILI_RST_PIN, GPIO_PIN_SET);
-}
 
-/* Enable LCD display */
-void ILI_Enable(void) {
-	HAL_GPIO_WritePin(ILI_RST_PORT, ILI_RST_PIN, GPIO_PIN_SET);
-}
+/* Configuration ------------------------------------------------------ */
 
-/* Send command/data to LCD
- * (internal function) */
-static inline HAL_StatusTypeDef ILI_SPI_Write(uint8_t Data, GPIO_PinState DC_PinState) {
-	if (DMA_Busy) return HAL_BUSY;
-	HAL_StatusTypeDef result;
-	HAL_GPIO_WritePin(ILI_CS_PORT, ILI_CS_PIN, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(ILI_DC_PORT, ILI_DC_PIN, DC_PinState);
-	result = HAL_SPI_Transmit(&ILI_SPI_HANDLE, &Data, 1, 1);
-	HAL_GPIO_WritePin(ILI_CS_PORT, ILI_CS_PIN, GPIO_PIN_SET);
-	return result;
-}
+// LCD RESOLUTION
+#define ILI_SCREEN_WIDTH 	320
+#define ILI_SCREEN_HEIGHT 	240
 
-/* Send command (char) to LCD */
-HAL_StatusTypeDef ILI_Write_Command(uint8_t Command) {
-	return ILI_SPI_Write(Command, GPIO_PIN_RESET);
-}
+// SCREEN ORIENTATION
+#define ILI_ROTATION		SCREEN_HORIZONTAL_1
 
-/* Send data (char) to LCD */
-HAL_StatusTypeDef ILI_Write_Data(uint8_t Data) {
-	return ILI_SPI_Write(Data, GPIO_PIN_SET);
-}
+// SPI HANDLE
+#define ILI_SPI_HANDLE		hspi3
 
-/* Set Address - Location block - to draw into
- * X, Y - start coordinates; W, H - block width and height */
-void ILI_Set_Address(uint16_t X, uint16_t Y, uint16_t W, uint16_t H) {
-	uint16_t X2 = X + W - 1;
-	uint16_t Y2 = Y + H - 1;
+// CHIP SELECT PIN AND PORT, STANDARD GPIO
+#define ILI_CS_PORT			Screen_CS_GPIO_Port
+#define ILI_CS_PIN			Screen_CS_Pin
 
-	Block_Width  = W;
-	Block_Height = H;
+// DATA COMMAND PIN AND PORT, STANDARD GPIO
+#define ILI_DC_PORT			Screen_DC_GPIO_Port
+#define ILI_DC_PIN			Screen_DC_Pin
 
-	ILI_Write_Command(0x2A);
-	ILI_Write_Data(X>>8);
-	ILI_Write_Data(X);
-	ILI_Write_Data(X2>>8);
-	ILI_Write_Data(X2);
+// RESET PIN AND PORT, STANDARD GPIO
+#define	ILI_RST_PORT		Screen_RST_GPIO_Port
+#define	ILI_RST_PIN			Screen_RST_Pin
 
-	ILI_Write_Command(0x2B);
-	ILI_Write_Data(Y>>8);
-	ILI_Write_Data(Y);
-	ILI_Write_Data(Y2>>8);
-	ILI_Write_Data(Y2);
+// DCACHE (Cortex-M7)
+#define ILI_DCACHE_ENABLED
 
-	ILI_Write_Command(0x2C);
-}
+/* -------------------------------------------------------------------- */
 
-/* Set rotation of the screen
- * Use ILI_Set_Address to set correct Width and Height afterwards */
-void ILI_Set_Rotation(uint8_t Rotation) {
-	uint8_t rotation_data;
 
-	switch(Rotation) {
-	case SCREEN_VERTICAL_1:
-		rotation_data = 0x40|0x08;
-		break;
-	case SCREEN_HORIZONTAL_1:
-		rotation_data = 0x20|0x08;
-		break;
-	case SCREEN_VERTICAL_2:
-		rotation_data = 0x80|0x08;
-		break;
-	case SCREEN_HORIZONTAL_2:
-		rotation_data = 0x40|0x80|0x20|0x08;
-		break;
-	default:
-		//EXIT IF SCREEN ROTATION NOT VALID!
-		break;
-	}
+/* RGB565 Colors */
+#define RGB(R,G,B)  ((uint16_t)((((uint8_t)R >> 3) << 11) | (((uint8_t)G >> 2) << 5) | ((uint8_t)B >> 3)))
+#define BLACK       0x0000
+#define NAVY        0x000F
+#define DARKGREEN   0x03E0
+#define DARKCYAN    0x03EF
+#define MAROON      0x7800
+#define PURPLE      0x780F
+#define OLIVE       0x7BE0
+#define LIGHTGREY   0xC618
+#define DARKGREY    0x7BEF
+#define BLUE        0x001F
+#define GREEN       0x07E0
+#define CYAN        0x07FF
+#define RED         0xF800
+#define MAGENTA     0xF81F
+#define YELLOW      0xFFE0
+#define WHITE       0xFFFF
+#define ORANGE      0xFD20
+#define GREENYELLOW 0xAFE5
+#define PINK        0xF81F
 
-	ILI_Write_Command(0x36);
-	ILI_Write_Data(rotation_data);
-}
+/* Screen orientation */
+#define SCREEN_VERTICAL_1		0
+#define SCREEN_HORIZONTAL_1		1
+#define SCREEN_VERTICAL_2		2
+#define SCREEN_HORIZONTAL_2		3
 
-/* Initialize LCD */
-void ILI_Init(void)
-{
-	ILI_Enable();
 
-	// SOFTWARE RESET
-	ILI_Write_Command(0x01);
-	HAL_Delay(20);	// min 5ms before next cmd
+/* Configuration functions */
+void ILI_Reset(void);
+void ILI_Enable(void);
+void ILI_Init(void);
+HAL_StatusTypeDef ILI_Write_Command(uint8_t Command);
+HAL_StatusTypeDef ILI_Write_Data(uint8_t Data);
+void ILI_Set_Rotation(uint8_t Rotation);
+void ILI_Set_Address(uint16_t X, uint16_t Y, uint16_t W, uint16_t H);
 
-	// POWER CONTROL A
-	ILI_Write_Command(0xCB);
-	ILI_Write_Data(0x39);
-	ILI_Write_Data(0x2C);
-	ILI_Write_Data(0x00);
-	ILI_Write_Data(0x34);
-	ILI_Write_Data(0x02);
+/* DMA functions */
+HAL_StatusTypeDef ILI_DMA_Load(uint16_t *Buf);
+HAL_StatusTypeDef ILI_DMA_Fill(uint16_t Color);
+HAL_StatusTypeDef ILI_DMA_Callback(void);
+uint8_t ILI_DMA_Busy(void);
 
-	// POWER CONTROL B
-	ILI_Write_Command(0xCF);
-	ILI_Write_Data(0x00);
-	ILI_Write_Data(0xC1);
-	ILI_Write_Data(0x30);
 
-	// DRIVER TIMING CONTROL A
-	ILI_Write_Command(0xE8);
-	ILI_Write_Data(0x85);
-	ILI_Write_Data(0x00);
-	ILI_Write_Data(0x78);
-
-	// DRIVER TIMING CONTROL B
-	ILI_Write_Command(0xEA);
-	ILI_Write_Data(0x00);
-	ILI_Write_Data(0x00);
-
-	// POWER ON SEQUENCE CONTROL
-	ILI_Write_Command(0xED);
-	ILI_Write_Data(0x64);
-	ILI_Write_Data(0x03);
-	ILI_Write_Data(0x12);
-	ILI_Write_Data(0x81);
-
-	// PUMP RATIO CONTROL
-	ILI_Write_Command(0xF7);
-	ILI_Write_Data(0x20);
-
-	// POWER CONTROL,VRH[5:0]
-	ILI_Write_Command(0xC0);
-	ILI_Write_Data(0x23);
-
-	// POWER CONTROL,SAP[2:0];BT[3:0]
-	ILI_Write_Command(0xC1);
-	ILI_Write_Data(0x10);
-
-	// VCM CONTROL
-	ILI_Write_Command(0xC5);
-	ILI_Write_Data(0x3E);
-	ILI_Write_Data(0x28);
-
-	// VCM CONTROL 2
-	ILI_Write_Command(0xC7);
-	ILI_Write_Data(0x86);
-
-	// MEMORY ACCESS CONTROL
-	ILI_Write_Command(0x36);
-	ILI_Write_Data(0x48);
-
-	// PIXEL FORMAT
-	ILI_Write_Command(0x3A);
-	ILI_Write_Data(0x55);
-
-	// FRAME RATIO CONTROL, STANDARD RGB COLOR
-	ILI_Write_Command(0xB1);
-	ILI_Write_Data(0x00);
-	ILI_Write_Data(0x18);
-
-	// DISPLAY FUNCTION CONTROL
-	ILI_Write_Command(0xB6);
-	ILI_Write_Data(0x08);
-	ILI_Write_Data(0x82);
-	ILI_Write_Data(0x27);
-
-	// 3GAMMA FUNCTION DISABLE
-	ILI_Write_Command(0xF2);
-	ILI_Write_Data(0x00);
-
-	// GAMMA CURVE SELECTED
-	ILI_Write_Command(0x26);
-	ILI_Write_Data(0x01);
-
-	// POSITIVE GAMMA CORRECTION
-	ILI_Write_Command(0xE0);
-	ILI_Write_Data(0x0F);
-	ILI_Write_Data(0x31);
-	ILI_Write_Data(0x2B);
-	ILI_Write_Data(0x0C);
-	ILI_Write_Data(0x0E);
-	ILI_Write_Data(0x08);
-	ILI_Write_Data(0x4E);
-	ILI_Write_Data(0xF1);
-	ILI_Write_Data(0x37);
-	ILI_Write_Data(0x07);
-	ILI_Write_Data(0x10);
-	ILI_Write_Data(0x03);
-	ILI_Write_Data(0x0E);
-	ILI_Write_Data(0x09);
-	ILI_Write_Data(0x00);
-
-	// NEGATIVE GAMMA CORRECTION
-	ILI_Write_Command(0xE1);
-	ILI_Write_Data(0x00);
-	ILI_Write_Data(0x0E);
-	ILI_Write_Data(0x14);
-	ILI_Write_Data(0x03);
-	ILI_Write_Data(0x11);
-	ILI_Write_Data(0x07);
-	ILI_Write_Data(0x31);
-	ILI_Write_Data(0xC1);
-	ILI_Write_Data(0x48);
-	ILI_Write_Data(0x08);
-	ILI_Write_Data(0x0F);
-	ILI_Write_Data(0x0C);
-	ILI_Write_Data(0x31);
-	ILI_Write_Data(0x36);
-	ILI_Write_Data(0x0F);
-
-	// EXIT SLEEP
-	ILI_Write_Command(0x11);
-	HAL_Delay(120);	// min 120ms
-
-	// TURN ON DISPLAY
-	ILI_Write_Command(0x29);
-
-	// STARTING ROTATION & ADDRESS
-	ILI_Set_Rotation(ILI_ROTATION);
-	ILI_Set_Address(0, 0, ILI_SCREEN_WIDTH, ILI_SCREEN_HEIGHT);
-}
-
-/* DMA Transfer functions -------------------------------- */
-/* Switch SPI data size
- * (internal function)
- * Generates preprocessor error if not implemented for your target platform */
-static inline void ILI_SPI_SetDataSize(uint32_t datasize) {
-	if (ILI_SPI_HANDLE.Init.DataSize != datasize) {
-		ILI_SPI_HANDLE.Init.DataSize =  datasize;
-		/* Platform specific implementation: */
-#ifdef STM32H7	// Tested on STM32H743 & STM32H753
-		/* SPI_CFG1 reg, bits 4:0 DSIZE[4:0]
-		 * 00111: 8-bit / 01111: 16-bit */
-		CLEAR_BIT(ILI_SPI_HANDLE.Instance->CFG1, SPI_DATASIZE_32BIT);
-		SET_BIT  (ILI_SPI_HANDLE.Instance->CFG1, datasize);
-#elif defined STM32F7
-		/* SPI_CR2 reg, bits 11:8 DS[3:0]
-		 * 0111: 8-bit / 1111: 16-bit */
-		CLEAR_BIT(ILI_SPI_HANDLE.Instance->CR2, SPI_DATASIZE_16BIT);
-		SET_BIT  (ILI_SPI_HANDLE.Instance->CR2, datasize);
-#elif defined STM32F4
-		/* SPI_CR1 reg, bit 11 DFF, 0: 8-bit / 1: 16-bit
-		 * This bit should be written only when SPI is disabled (SPE = ‘0’) for correct operation.
-		 * SPI_CR1, bit 6 SPE */
-		CLEAR_BIT(ILI_SPI_HANDLE.Instance->CR1, SPI_CR1_SPE);
-		CLEAR_BIT(ILI_SPI_HANDLE.Instance->CR1, SPI_DATASIZE_16BIT);
-		SET_BIT  (ILI_SPI_HANDLE.Instance->CR1, datasize);
-		SET_BIT  (ILI_SPI_HANDLE.Instance->CR1, SPI_CR1_SPE);
-#else
-#error "SPI Data Size switching not implemented for target platform."
 #endif
-	}
-}
-
-/* Enable/disable DMA Memory Address Increment
- * (internal function)
- * Generates preprocessor error if not implemented for your target platform */
-static inline void ILI_SPI_DMA_SetMemInc(uint32_t mode) {
-	if (ILI_SPI_HANDLE.hdmatx->Init.MemInc != mode) {
-		ILI_SPI_HANDLE.hdmatx->Init.MemInc =  mode;
-		/* Platform specific implementation: */
-#if defined STM32H7 || defined STM32F7 || defined STM32F4	// same on H7, F7, F4, and probably others
-		/* DMA_SxCR reg, bit 10 MINC
-		 * 1: increment enabled / 0: disabled (fixed pointer) */
-		CLEAR_BIT(((DMA_Stream_TypeDef *)ILI_SPI_HANDLE.hdmatx->Instance)->CR, DMA_MINC_ENABLE);
-		SET_BIT  (((DMA_Stream_TypeDef *)ILI_SPI_HANDLE.hdmatx->Instance)->CR, mode);
-#else
-#error "DMA Memory Increment Mode switching not implemented for target platform."
-#endif
-	}
-}
-
-/* Start DMA transfer
- * (internal function)
- * DMA module should be configured for half-word (16-bit) operation */
-static HAL_StatusTypeDef ILI_DMA_Transfer(uint16_t *Buf, uint32_t MemInc) {
-	if (DMA_Busy) return HAL_BUSY;
-
-	// Check DMA data size
-	// Abort in case of wrong configuration
-	if (ILI_SPI_HANDLE.hdmatx->Init.PeriphDataAlignment != DMA_PDATAALIGN_HALFWORD) return HAL_ERROR;
-
-	DMA_Busy = 1;
-
-	HAL_GPIO_WritePin(ILI_DC_PORT, ILI_DC_PIN, GPIO_PIN_SET);
-	HAL_GPIO_WritePin(ILI_CS_PORT, ILI_CS_PIN, GPIO_PIN_RESET);
-
-	// Configure SPI & DMA peripherals
-	ILI_SPI_SetDataSize(SPI_DATASIZE_16BIT);
-	ILI_SPI_DMA_SetMemInc(MemInc);
-
-	// Size set by ILI_Set_Address()
-	uint32_t Size = Block_Width * Block_Height;
-
-	// Clean DCache before DMA write operations
-	#if defined __DCACHE_PRESENT && (__DCACHE_PRESENT == 1U) && defined ILI_DCACHE_ENABLED
-	if (MemInc == DMA_MINC_ENABLE) {
-		SCB_CleanDCache_by_Addr((uint32_t *)Buf, Size*2);	// size in bytes
-	} else {
-		SCB_CleanDCache_by_Addr((uint32_t *)Buf, 2);
-	}
-	#endif
-
-	// Using callback function to start transfer
-	DMA_SizeRemaining = Size;
-	DMA_BufRemaining  = Buf;
-	return ILI_DMA_Callback();
-}
-
-/* Start DMA transfer */
-HAL_StatusTypeDef ILI_DMA_Load(uint16_t *Buf) {
-	if (DMA_Busy) return HAL_BUSY;
-	return ILI_DMA_Transfer(Buf, DMA_MINC_ENABLE);
-}
-
-/* Fill display with solid color */
-HAL_StatusTypeDef ILI_DMA_Fill(uint16_t Color) {
-	if (DMA_Busy) return HAL_BUSY;
-	DMA_BufFill = Color;
-	return ILI_DMA_Transfer((uint16_t *)&DMA_BufFill, DMA_MINC_DISABLE);
-}
-
-/* Continue/finish DMA transfer
- * To be called from HAL_SPI_TxCpltCallback */
-HAL_StatusTypeDef ILI_DMA_Callback(void) {
-	HAL_StatusTypeDef result = HAL_OK;
-
-	if (DMA_SizeRemaining > 0) {	// Continue transfer
-		uint16_t TransferSize;
-		uint16_t *TransferBuf = (uint16_t *)DMA_BufRemaining;
-
-		// Calculate DMA transfer size
-		// (DMA module has 16-bit counter)
-		if (DMA_SizeRemaining < UINT16_MAX) {
-			TransferSize = DMA_SizeRemaining;
-			DMA_SizeRemaining = 0;
-		} else {
-			TransferSize = UINT16_MAX - (UINT16_MAX % (Block_Width));
-			DMA_SizeRemaining -= TransferSize;
-			if (ILI_SPI_HANDLE.hdmatx->Init.MemInc != DMA_MINC_DISABLE) {	// Check if DMA_Fill in progress
-				DMA_BufRemaining = &DMA_BufRemaining[TransferSize];
-			}
-		}
-
-		result = HAL_SPI_Transmit_DMA(&ILI_SPI_HANDLE, (uint8_t *)TransferBuf, TransferSize);
-	} else {
-		// Restore 8-bit data size
-		ILI_SPI_SetDataSize(SPI_DATASIZE_8BIT);
-		// Restore MemInc
-		ILI_SPI_DMA_SetMemInc(DMA_MINC_ENABLE);
-
-		HAL_GPIO_WritePin(ILI_CS_PORT, ILI_CS_PIN, GPIO_PIN_SET);
-		DMA_Busy = 0;
-	}
-
-	return result;
-}
-
-/* Returns non-zero value if transfer in progress */
-uint8_t ILI_DMA_Busy(void) {
-	return DMA_Busy;
-}

@@ -1,0 +1,15 @@
+../Core/Src/ILI9341_DMA_Driver.c:19:6:ILI_Reset	8	static
+../Core/Src/ILI9341_DMA_Driver.c:28:6:ILI_Enable	8	static
+../Core/Src/ILI9341_DMA_Driver.c:34:33:ILI_SPI_Write	24	static
+../Core/Src/ILI9341_DMA_Driver.c:45:19:ILI_Write_Command	16	static
+../Core/Src/ILI9341_DMA_Driver.c:50:19:ILI_Write_Data	16	static
+../Core/Src/ILI9341_DMA_Driver.c:56:6:ILI_Set_Address	32	static
+../Core/Src/ILI9341_DMA_Driver.c:80:6:ILI_Set_Rotation	24	static
+../Core/Src/ILI9341_DMA_Driver.c:106:6:ILI_Init	8	static
+../Core/Src/ILI9341_DMA_Driver.c:246:20:ILI_SPI_SetDataSize	16	static
+../Core/Src/ILI9341_DMA_Driver.c:277:20:ILI_SPI_DMA_SetMemInc	16	static
+../Core/Src/ILI9341_DMA_Driver.c:295:26:ILI_DMA_Transfer	24	static
+../Core/Src/ILI9341_DMA_Driver.c:330:19:ILI_DMA_Load	16	static
+../Core/Src/ILI9341_DMA_Driver.c:336:19:ILI_DMA_Fill	16	static
+../Core/Src/ILI9341_DMA_Driver.c:344:19:ILI_DMA_Callback	16	static
+../Core/Src/ILI9341_DMA_Driver.c:379:9:ILI_DMA_Busy	4	static
