@@ -74,8 +74,8 @@ TaskHandle_t xDataProcessHandle  = NULL;
 #define MIC_PDM_BUFFER_TOTAL 128
 volatile uint16_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
 
-//current mode of display
-enum display_mode_enum {FREQUENCY_BARS};
+//current mode of display (https://huggingface.co/learn/audio-course/chapter1/audio_data)
+enum display_mode_enum { SPECTOGRAM, WAVEFORM, FREQUENCY_BARS, OCTAVE_BANDS, STOP,  };
 
 
 //INTERRUPT HANDLERS
@@ -122,6 +122,7 @@ void dataProcessTask(void * pvParameters ) {
 void screenTask(void * pvParameters ) {
 	uint32_t ulNotifiedValue;
 	while(1) {
+		//https://huggingface.co/learn/audio-course/chapter1/audio_data
 		//wait for the data
 		xTaskNotifyWait(0, 0xFFFFFFFF, &ulNotifiedValue, portMAX_DELAY);
 		//process the data
@@ -179,18 +180,18 @@ int main(void)
   xReturned = xTaskCreate(
               dataProcessTask,       /* Function that implements the task. */
               "data_proc_task",          /* Text name for the task. */
-              512,      /* Stack size in words, not bytes. */
+              1024,      /* Stack size in words, not bytes. */
               ( void * ) NULL,    /* Parameter passed into the task. */
               3,/* Priority at which the task is created. */
               &xDataProcessHandle);      /* Used to pass out the created task's handle. */
   vTaskStartScheduler();
   xReturned = xTaskCreate(
-                dataProcessTask,       /* Function that implements the task. */
+                screenTask,       /* Function that implements the task. */
                 "screen_update_task",          /* Text name for the task. */
-                512,      /* Stack size in words, not bytes. */
+                1024,      /* Stack size in words, not bytes. */
                 ( void * ) NULL,    /* Parameter passed into the task. */
                 3,/* Priority at which the task is created. */
-                &xDataProcessHandle);      /* Used to pass out the created task's handle. */
+                &xScreenTaskHandle);      /* Used to pass out the created task's handle. */
     vTaskStartScheduler();
   /* USER CODE END 2 */
 
