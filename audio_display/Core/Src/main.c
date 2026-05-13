@@ -20,8 +20,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "crc.h"
 #include "dma.h"
 #include "i2s.h"
+#include "pdm2pcm.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -30,6 +32,7 @@
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
 #include "ILI9341_DMA_Driver.h"
+#include "arm_math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,13 +73,32 @@ TaskHandle_t xBTTaskHandle     = NULL;
 //a task to read sensor outputs
 TaskHandle_t xDataProcessHandle  = NULL;
 
+//PDM T PCMS
+extern PDM_Filter_Handler_t PDM1_filter_handler;
+
 //SAMPLE BUFFER
-#define MIC_PDM_BUFFER_TOTAL 128
-volatile uint16_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
+#define MIC_PDM_BUFFER_TOTAL 256
+#define MIC_PCM_BUFFER_TOTAL 512 //MIC_BUFFER_TOTAL / 16
+volatile uint8_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
+int16_t pcmBuffer[MIC_PCM_BUFFER_TOTAL];
+uint32_t pcmBufferNext = 0; //where to write samples next
 
 //current mode of display (https://huggingface.co/learn/audio-course/chapter1/audio_data)
-enum display_mode_enum { SPECTOGRAM, WAVEFORM, FREQUENCY_BARS, OCTAVE_BANDS, STOP,  };
+//https://source-separation.github.io/tutorial/basics/representations.html
+enum display_mode_enum {SPECTOGRAM, //same as frequency bars but with range
+						WAVEFORM, //sound as waveform
+						FREQUENCY_BARS, //split audio into frequence ranges and show the energy in each range as a bar
+						OCTAVE_BANDS, //musical octaves rather than frequency bars
+						STOP};
+volatile enum display_mode_enum display_mode = WAVEFORM;
 
+//waveform settings
+uint32_t waveWaitSamples = 1000; //48000/1000 = 48Hz
+uint32_t waveAmp = 30;
+
+//bluetooth variables
+#define UART_BUFFER_SIZE 1
+uint8_t UART2_rxBuffer[UART_BUFFER_SIZE];
 
 //INTERRUPT HANDLERS
 
@@ -116,7 +138,16 @@ void dataProcessTask(void * pvParameters ) {
 		xTaskNotifyWait(0, 0xFFFFFFFF, &ulNotifiedValue, portMAX_DELAY);
 		//process the data
 		printf("data received, the address of the array is %d \n", ulNotifiedValue);
+		//convert pdm to pcm for further analysis
+		//uint16_t pcmBuff[32];
+		PDM_Filter((uint8_t *)ulNotifiedValue, &pcmBuffer[pcmBufferNext], &PDM1_filter_handler);
+		pcmBufferNext = (pcmBufferNext + 32) % ;
+
 	}
+}
+
+dravWave() {
+
 }
 
 void screenTask(void * pvParameters ) {
@@ -126,7 +157,22 @@ void screenTask(void * pvParameters ) {
 		//wait for the data
 		xTaskNotifyWait(0, 0xFFFFFFFF, &ulNotifiedValue, portMAX_DELAY);
 		//process the data
-		printf("data received, the address of the array is %d \n", ulNotifiedValue);
+		switch (display_mode) {
+			case SPECTOGRAM:
+			case WAVEFORM:
+				drawWave();
+			case FREQUENCY_BARS:
+			case OCTAVE_BANDS:
+			case STOP:
+			default:
+		}
+		printf("data displayed\n");
+	}
+}
+
+void btTask(void *pvParameters) {
+	while(1) {
+
 	}
 }
 
@@ -165,6 +211,8 @@ int main(void)
   MX_I2S2_Init();
   MX_SPI3_Init();
   MX_USART1_UART_Init();
+  MX_CRC_Init();
+  MX_PDM2PCM_Init();
   /* USER CODE BEGIN 2 */
   //turn on the screen
   HAL_GPIO_WritePin(Screen_BL_GPIO_Port, Screen_BL_Pin, GPIO_PIN_SET);
@@ -175,14 +223,17 @@ int main(void)
   //first DMA transfer
   HAL_I2S_Transmit_DMA(&hi2s2, pdmBuffer, MIC_PDM_BUFFER_TOTAL);
   //create tasks
+  //bluetooth listen
+  HAL_UART_Receive_IT(&huart1, &UART2_rxBuffer, UART_BUFFER_SIZE);
+  //tasks
   BaseType_t xReturned;
   /* Create the task, storing the handle. */
   xReturned = xTaskCreate(
               dataProcessTask,       /* Function that implements the task. */
               "data_proc_task",          /* Text name for the task. */
-              1024,      /* Stack size in words, not bytes. */
+              2048,      /* Stack size in words, not bytes. */
               ( void * ) NULL,    /* Parameter passed into the task. */
-              3,/* Priority at which the task is created. */
+              2,/* Priority at which the task is created. */
               &xDataProcessHandle);      /* Used to pass out the created task's handle. */
   vTaskStartScheduler();
   xReturned = xTaskCreate(
@@ -192,17 +243,14 @@ int main(void)
                 ( void * ) NULL,    /* Parameter passed into the task. */
                 3,/* Priority at which the task is created. */
                 &xScreenTaskHandle);      /* Used to pass out the created task's handle. */
+  xReturned = xTaskCreate(btTask,
+		  	  	  	  	  "blt_task",
+		  	  	  	  	  512,
+						  (void*)NULL,
+						  1,
+						  &xBTTaskHandle);
     vTaskStartScheduler();
   /* USER CODE END 2 */
-
-  /* Init scheduler */
-  //osKernelInitialize();
-
-  /* Call init function for freertos objects (in cmsis_os2.c) */
-  //MX_FREERTOS_Init();
-
-  /* Start scheduler */
-  //osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
 
