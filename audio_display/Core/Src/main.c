@@ -65,6 +65,9 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+//base color and line color
+uint16_t BASE_COLOR = YELLOW;
+uint16_t DISPLAY_COLOR = BLUE;
 //TASK HANDLES
 //a task to send output to the screen
 TaskHandle_t xScreenTaskHandle = NULL;
@@ -77,10 +80,10 @@ TaskHandle_t xDataProcessHandle  = NULL;
 extern PDM_Filter_Handler_t PDM1_filter_handler;
 
 //SAMPLE BUFFER
-#define MIC_PDM_BUFFER_TOTAL 256
+#define MIC_PDM_BUFFER_TOTAL 128
 #define MIC_PCM_BUFFER_TOTAL 512 //MIC_BUFFER_TOTAL / 16
-volatile uint8_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
-int16_t pcmBuffer[MIC_PCM_BUFFER_TOTAL];
+volatile uint16_t pdmBuffer[MIC_PDM_BUFFER_TOTAL];
+volatile int16_t pcmBuffer[MIC_PCM_BUFFER_TOTAL];
 uint32_t pcmBufferNext = 0; //where to write samples next
 
 //current mode of display (https://huggingface.co/learn/audio-course/chapter1/audio_data)
@@ -92,9 +95,14 @@ enum display_mode_enum {SPECTOGRAM, //same as frequency bars but with range
 						STOP};
 volatile enum display_mode_enum display_mode = WAVEFORM;
 
-//waveform settings
-uint32_t waveWaitSamples = 1000; //48000/1000 = 48Hz
-uint32_t waveAmp = 30;
+//waveform settings and values
+volatile uint32_t waveWaitSamples = 512; //48000/1000 = 48Hz
+volatile uint32_t waveAmp = 70;
+volatile int16_t minSample = INT16_MAX;
+volatile int16_t maxSample = INT16_MIN;
+volatile uint32_t sampleCount = 0;
+volatile uint16_t screenPtr = 0;
+volatile uint16_t dmaBufCol[ILI_SCREEN_HEIGHT];
 
 //bluetooth variables
 #define UART_BUFFER_SIZE 1
@@ -127,7 +135,7 @@ void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
 		                   (uint32_t)&pdmBuffer[0],        /* first half pointer */
 		                   eSetValueWithOverwrite,
 		                   &xHigherPriorityTaskWoken);
-		    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 //task functions
@@ -138,16 +146,63 @@ void dataProcessTask(void * pvParameters ) {
 		xTaskNotifyWait(0, 0xFFFFFFFF, &ulNotifiedValue, portMAX_DELAY);
 		//process the data
 		printf("data received, the address of the array is %d \n", ulNotifiedValue);
-		//convert pdm to pcm for further analysis
+		//convert pdm to pcm for further analysis and buffer it
 		//uint16_t pcmBuff[32];
 		PDM_Filter((uint8_t *)ulNotifiedValue, &pcmBuffer[pcmBufferNext], &PDM1_filter_handler);
-		pcmBufferNext = (pcmBufferNext + 32) % ;
-
+		//reset min/max
+		//iterate over all newly received samples
+		for (int i = 0; i < 32; i++) {
+			if (pcmBuffer[pcmBufferNext + i] < minSample) {
+				minSample = pcmBuffer[pcmBufferNext + i];
+			} else if (pcmBuffer[pcmBufferNext + i] > maxSample) {
+				maxSample = pcmBuffer[pcmBufferNext + i];
+			}
+		}
+		//update PCM buffer index
+		pcmBufferNext = (pcmBufferNext + 32) % MIC_PCM_BUFFER_TOTAL;
+		//now, find min/max values for the buffer
+		sampleCount += 32;
+		if (sampleCount == waveWaitSamples) {
+			sampleCount = 0; //update the sample count
+			//wake up the screen task
+			xTaskNotify(xScreenTaskHandle, 0, eSetValueWithOverwrite);
+		}
 	}
 }
 
-dravWave() {
+//convert from -32,768 to 32,767 range to 0-320 range
+uint16_t pcmToLCD(int16_t pcm, uint32_t waveAmp) {
+	uint32_t usable = 240 * waveAmp / 100;
+	uint32_t offset = (240 - usable) / 2;
+	return (uint16_t)(((int32_t)pcm + 32768) * usable / 65535 + offset);
+}
 
+//shift the screen leftwards
+void shiftLeft() {
+	screenPtr = (screenPtr + 1) % 320; //update the VSP
+	ILI_Write_Command(0x37);
+	ILI_Write_Data((uint8_t)((screenPtr >> 8) & 0xFF)); //first half of VSP
+	ILI_Write_Data((uint8_t)((screenPtr) & 0xFF)); //second half of VSP
+}
+
+void drawWave(uint16_t minLCD, uint16_t maxLCD) {
+	//first, shift the screen buffer
+	shiftLeft();
+	//clear and draw the column
+	uint16_t colAddr = (screenPtr + 319) % 320;
+	for (int i = 0; i < ILI_SCREEN_HEIGHT; i++) {
+		if ((i >= minLCD) && (i <= maxLCD)) {
+			dmaBufCol[i] = DISPLAY_COLOR;
+		} else {
+			dmaBufCol[i] = BASE_COLOR;
+		}
+	}
+	ILI_Set_Address(colAddr, 0, 1, 240); //clear the whole column
+	ILI_DMA_Load(dmaBufCol);
+	//ILI_DMA_Fill(BASE_COLOR);
+	//display the column
+	//ILI_Set_Address(colAddr, minLCD, 1, maxLCD - minLCD); //rewrite the column
+	//ILI_DMA_Fill(DISPLAY_COLOR);
 }
 
 void screenTask(void * pvParameters ) {
@@ -159,13 +214,22 @@ void screenTask(void * pvParameters ) {
 		//process the data
 		switch (display_mode) {
 			case SPECTOGRAM:
+				break;
 			case WAVEFORM:
-				drawWave();
+				uint16_t minLCD = pcmToLCD(minSample, waveAmp);
+				uint16_t maxLCD = pcmToLCD(maxSample, waveAmp);
+				drawWave(minLCD, maxLCD);
+				break;
 			case FREQUENCY_BARS:
+				break;
 			case OCTAVE_BANDS:
+				break;
 			case STOP:
+				break;
 			default:
 		}
+		minSample = INT16_MAX; //greatest possible value
+		maxSample = INT16_MIN;
 		printf("data displayed\n");
 	}
 }
@@ -218,13 +282,29 @@ int main(void)
   HAL_GPIO_WritePin(Screen_BL_GPIO_Port, Screen_BL_Pin, GPIO_PIN_SET);
   //init screen
   ILI_Init();
+  //set rotation
+  //ILI_Set_Rotation(SCREEN_HORIZONTAL_2);
   //fill it with the default color
-  ILI_DMA_Fill(WHITE);
-  //first DMA transfer
-  HAL_I2S_Transmit_DMA(&hi2s2, pdmBuffer, MIC_PDM_BUFFER_TOTAL);
+  ILI_DMA_Fill(BASE_COLOR);
+  //test
+  //clear and draw the column
+  //while(ILI_DMA_Busy());
+  //uint16_t colAddr = (screenPtr + 319) % 320;
+  //uint16_t dmaBuf[ILI_SCREEN_HEIGHT];
+  //for (int i = 0; i < ILI_SCREEN_HEIGHT; i++) {
+  	//if ((i >= 10) && (i <= 200)) {
+  		//dmaBuf[i] = DISPLAY_COLOR;
+  	//} else {
+  		//	dmaBuf[i] = BASE_COLOR;
+  		//}
+  	//}
+  	//ILI_Set_Address(10, 0, 1, 240); //clear the whole column
+  	//ILI_DMA_Load(dmaBuf);
+  //first DMA transfer (uncomment later)
+  HAL_I2S_Receive_DMA(&hi2s2, pdmBuffer, MIC_PDM_BUFFER_TOTAL);
   //create tasks
   //bluetooth listen
-  HAL_UART_Receive_IT(&huart1, &UART2_rxBuffer, UART_BUFFER_SIZE);
+  HAL_UART_Receive_IT(&huart1, UART2_rxBuffer, UART_BUFFER_SIZE);
   //tasks
   BaseType_t xReturned;
   /* Create the task, storing the handle. */
@@ -235,7 +315,6 @@ int main(void)
               ( void * ) NULL,    /* Parameter passed into the task. */
               2,/* Priority at which the task is created. */
               &xDataProcessHandle);      /* Used to pass out the created task's handle. */
-  vTaskStartScheduler();
   xReturned = xTaskCreate(
                 screenTask,       /* Function that implements the task. */
                 "screen_update_task",          /* Text name for the task. */
